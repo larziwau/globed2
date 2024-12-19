@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(globed2 VERSION 1.0.1)
+project(globed2 VERSION 1.0.0)
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "iOS")
     unset(CMAKE_OSX_ARCHITECTURES)
@@ -174,10 +174,80 @@ else()
 
     add_library(opus STATIC IMPORTED)
     set_target_properties(opus PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/libs/opus/opus.lib")
+
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SODIUM_STATIC=1)
+    target_include_directories(${PROJECT_NAME} PRIVATE "${sodium_SOURCE_DIR}/src/libsodium/include")
+    target_include_directories(${PROJECT_NAME} PRIVATE "${opus_SOURCE_DIR}/include")
+
+    set(SODIUM_VERSION_IN "${CMAKE_CURRENT_SOURCE_DIR}/libs/sodium/version.h")
+    set(SODIUM_VERSION_OUT "${sodium_SOURCE_DIR}/src/libsodium/include/sodium/")
+    if (NOT EXISTS "${SODIUM_VERSION_OUT}/version.h")
+        file(COPY "${SODIUM_VERSION_IN}" DESTINATION "${SODIUM_VERSION_OUT}")
+    endif()
+	
+	target_link_libraries(${PROJECT_NAME} sodium opus)
 endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/../libs/ios ${CMAKE_BINARY_DIR}/libs/ios)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/../libs/ios)
-    target_link_libraries(${PROJECT_NAME} geode)
+if (WIN32)
+    target_link_libraries(${PROJECT_NAME} ws2_32)
 endif()
+
+if (APPLE)
+    find_library(IOKIT_LIBRARY IOKit)
+    target_link_libraries(${PROJECT_NAME} ${IOKIT_LIBRARY})
+endif()
+
+CPMAddPackage(
+    NAME curl
+    GIT_REPOSITORY "https://github.com/curl/curl.git"
+    GIT_TAG "curl-8.11.1_1"
+    DOWNLOAD_ONLY YES
+)
+
+add_library(curl STATIC IMPORTED)
+
+if (ANDROID)
+    if (ANDROID_ABI STREQUAL "arm64-v8a")
+        set(LIB_PLATFORM "android64")
+    else()
+        set(LIB_PLATFORM "android32")
+    endif()
+elseif (WIN32)
+    set(LIB_PLATFORM "win64")
+else()
+    set(LIB_PLATFORM "macos")
+endif()
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE CURL_STATICLIB=1)
+
+if (WIN32)
+    set_target_properties(curl PROPERTIES IMPORTED_LOCATION "$ENV{GEODE_SDK}/loader/include/link/${LIB_PLATFORM}/libcurl.lib")
+else()
+    set_target_properties(curl PROPERTIES IMPORTED_LOCATION "$ENV{GEODE_SDK}/loader/include/link/${LIB_PLATFORM}/libcurl.a")
+endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${curl_SOURCE_DIR}/include")
+
+target_link_libraries(${PROJECT_NAME} curl)
+
+if (APPLE)
+	target_link_libraries(${PROJECT_NAME} z)
+elseif (WIN32)
+    target_link_libraries(${PROJECT_NAME} crypt32)
+elseif (ANDROID)
+    target_link_libraries(${PROJECT_NAME} android)
+endif()
+
+if (GLOBED_OSS_BUILD)
+    message(STATUS "Building open-source version, not linking to bb")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE GLOBED_OSS_BUILD=1)
+else()
+    if (WIN32)
+        target_link_libraries(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/libs/bb/bb.lib")
+        target_link_libraries(${PROJECT_NAME} ntdll.lib userenv.lib runtimeobject.lib Iphlpapi.lib)
+    else ()
+        target_link_libraries(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/libs/bb/bb-${LIB_PLATFORM}.a")
+    endif()
+endif()
+
+setup_geode_mod(${PROJECT_NAME})
